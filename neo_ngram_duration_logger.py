@@ -47,6 +47,7 @@ trigram_file = os.path.join(individual_runs, f"trigrams_{timestamp}.csv")
 bigram_durations = {}   # {bigram: [durations]}
 trigram_durations = {}  # {trigram: [durations]}
 key_buffer = []         # store recent keys
+time_buffer = []        # store recent press times
 last_time = None
 last_flush = time.time()
 
@@ -126,7 +127,7 @@ def key_to_str(key):
 
 # ---------- 9. Key press handler ----------
 def on_press(key):
-    global last_time, key_buffer
+    global last_time, key_buffer, time_buffer
     current_time = time.time() * 1000  # milliseconds
     key_str = key_to_str(key)
 
@@ -140,21 +141,24 @@ def on_press(key):
             bigram = prev_key + key_str
             bigram_durations.setdefault(bigram, []).append(interval)
 
-            # Trigram
+            # Trigram (timestamp-based)
             if len(key_buffer) >= 2:
                 trigram = key_buffer[-2] + prev_key + key_str
-                prev_bigram_interval = bigram_durations.get(key_buffer[-2] + prev_key, [0])[-1]
-                trigram_duration = prev_bigram_interval + interval
+                trigram_duration = current_time - time_buffer[-2]  # <-- use timestamp diff
                 trigram_durations.setdefault(trigram, []).append(trigram_duration)
 
-                if key_buffer[-2] in ("<ctrl>", "<ctrl_l>", "<ctrl_r>") and prev_key in ("<shift>", "<shift_l>", "<shift_r>") and key_str == "<esc>":
+                if (key_buffer[-2] in ("<ctrl>", "<ctrl_l>", "<ctrl_r>") and 
+                    prev_key in ("<shift>", "<shift_l>", "<shift_r>") and 
+                    key_str == "<esc>"):
                     print("\nDetected CTRL → SHIFT → ESC trigram. Exiting the script.\n")
                     return False
 
-    # Update buffer
+    # Update buffers
     key_buffer.append(key_str)
+    time_buffer.append(current_time)   # <-- store timestamp
     if len(key_buffer) > 2:
         key_buffer.pop(0)
+        time_buffer.pop(0)
 
     last_time = current_time
 
