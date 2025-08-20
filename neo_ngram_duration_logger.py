@@ -1,6 +1,5 @@
 import importlib
 import sys
-import subprocess
 
 # ---------- 1. Check for missing packages ----------
 required_packages = ["pynput"]
@@ -22,28 +21,28 @@ if missing_packages:
 import argparse
 import csv
 import os
-import ctypes
 from datetime import datetime
 from pynput import keyboard
 import time
 import threading
 import random  # for shuffling rows
 import glob
-import threading
 import json
 import ast
 
 # ---------- 3. Command-line argument ----------
 parser = argparse.ArgumentParser(description="Keylogger for bigram and trigram durations")
-parser.add_argument("--output-dir", default="./individual_runs", help="Directory to store log files")
+parser.add_argument("--output-dir", default="./neo_ngram_durations", help="Directory to store log files")
 args = parser.parse_args()
 output_dir = args.output_dir
 os.makedirs(output_dir, exist_ok=True)
 
 # ---------- 4. File setup ----------
+individual_runs = os.path.join(output_dir, "individual_runs")
+os.makedirs(individual_runs, exist_ok=True)
 timestamp = datetime.now().strftime("%y%m%d_%H%M%S")
-bigram_file = os.path.join(output_dir, f"bigrams_{timestamp}.csv")
-trigram_file = os.path.join(output_dir, f"trigrams_{timestamp}.csv")
+bigram_file = os.path.join(individual_runs, f"bigrams_{timestamp}.csv")
+trigram_file = os.path.join(individual_runs, f"trigrams_{timestamp}.csv")
 
 bigram_durations = {}   # {bigram: [durations]}
 trigram_durations = {}  # {trigram: [durations]}
@@ -53,6 +52,7 @@ last_flush = time.time()
 
 # create the lock before any thread uses it (fixes race on undefined 'lock')
 lock = threading.Lock()
+stop_event = threading.Event()   # <-- added for clean shutdown
 
 # ---------- 5. CSV Initialization ----------
 def init_csv_files():
@@ -107,7 +107,7 @@ def flush_to_csv():
 
 # ---------- 7. Periodic flush ----------
 def periodic_flush():
-    while True:
+    while not stop_event.is_set():   # <-- stop when event is set
         if time.time() - last_flush >= 10:  # flush every 10 seconds
             flush_to_csv()
         time.sleep(1)
@@ -169,6 +169,10 @@ try:
 except KeyboardInterrupt:
     pass  # graceful stop
 
+# Tell flush thread to stop and wait for it
+stop_event.set()
+flush_thread.join()
+
 # ---------- 11. Merge all past runs into one combined file ----------
 def merge_all_files(output_dir, pattern, combined_filename):
     """
@@ -179,32 +183,33 @@ def merge_all_files(output_dir, pattern, combined_filename):
 
     combined_data = {}
 
-    # Collect all files matching the pattern (e.g., bigrams_*.csv)
-    for file_path in glob.glob(os.path.join(output_dir, pattern)):
-        if file_path.endswith(combined_filename):  # skip the final combined file itself
-            continue
-        with open(file_path, newline='') as f:
-            reader = csv.reader(f)
-            header = next(reader, None)  # skip header
-            for row in reader:
-                if len(row) != 2:
-                    continue
-                key, durations_str = row
-                try:
-                    # Prefer JSON, fallback to safe literal_eval for legacy rows
-                    if isinstance(durations_str, str):
-                        try:
-                            durations = json.loads(durations_str)
-                        except json.JSONDecodeError:
-                            durations = ast.literal_eval(durations_str)
-                    else:
-                        durations = durations_str
-                    if not isinstance(durations, list):
-                        durations = [durations]
-                except Exception:
-                    continue
+    with lock:   # <-- added lock to avoid race with flush_to_csv()
+        # Collect all files matching the pattern (e.g., bigrams_*.csv)
+        for file_path in glob.glob(os.path.join(output_dir, pattern)):
+            if file_path.endswith(combined_filename):  # skip the final combined file itself
+                continue
+            with open(file_path, newline='') as f:
+                reader = csv.reader(f)
+                header = next(reader, None)  # skip header
+                for row in reader:
+                    if len(row) != 2:
+                        continue
+                    key, durations_str = row
+                    try:
+                        # Prefer JSON, fallback to safe literal_eval for legacy rows
+                        if isinstance(durations_str, str):
+                            try:
+                                durations = json.loads(durations_str)
+                            except json.JSONDecodeError:
+                                durations = ast.literal_eval(durations_str)
+                        else:
+                            durations = durations_str
+                        if not isinstance(durations, list):
+                            durations = [durations]
+                    except Exception:
+                        continue
 
-                combined_data.setdefault(key, []).extend(durations)
+                    combined_data.setdefault(key, []).extend(durations)
 
     # Shuffle durations per key
     rows = []
