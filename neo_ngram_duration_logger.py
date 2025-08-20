@@ -130,7 +130,7 @@ def on_press(key):
         # Trigram
         if len(key_buffer) >= 2:
             trigram = key_buffer[-2] + prev_key + key_str
-            prev_bigram_interval = bigram_durations.get(key_buffer[-2] + "→" + prev_key, [0])[-1]
+            prev_bigram_interval = bigram_durations.get(key_buffer[-2] + prev_key, [0])[-1]
             trigram_duration = prev_bigram_interval + interval
             trigram_durations.setdefault(trigram, []).append(trigram_duration)
 
