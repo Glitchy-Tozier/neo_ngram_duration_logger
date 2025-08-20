@@ -29,6 +29,9 @@ import time
 import threading
 import random  # for shuffling rows
 import glob
+import threading
+import json
+import ast
 
 # ---------- 3. Command-line argument ----------
 parser = argparse.ArgumentParser(description="Keylogger for bigram and trigram durations")
@@ -48,6 +51,9 @@ key_buffer = []         # store recent keys
 last_time = None
 last_flush = time.time()
 
+# create the lock before any thread uses it (fixes race on undefined 'lock')
+lock = threading.Lock()
+
 # ---------- 5. CSV Initialization ----------
 def init_csv_files():
     for file_path, header in [(bigram_file, ["bigram", "durations"]), 
@@ -60,36 +66,42 @@ def init_csv_files():
 # ---------- 6. Flush function with row shuffling ----------
 def flush_to_csv():
     global last_flush
+    with lock:
+        # ---------- Bigram CSV ----------
+        rows = []
+        for bigram, durations in bigram_durations.items():
+            # Shuffle the durations to obscure the order of typing for privacy
+            shuffled_durations = durations[:]  # make a copy
+            random.shuffle(shuffled_durations)  # shuffle durations for privacy
+            # store as JSON for safe round-tripping
+            rows.append([bigram, json.dumps(shuffled_durations)])
+        
+        # Shuffle the rows themselves to further prevent reconstructing typing sequences
+        random.shuffle(rows)  # shuffle rows for privacy
+        tmp_path = bigram_file + ".tmp"
+        with open(tmp_path, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(["bigram", "durations"])
+            writer.writerows(rows)
+        os.replace(tmp_path, bigram_file)  # atomic replace
 
-    # ---------- Bigram CSV ----------
-    rows = []
-    for bigram, durations in bigram_durations.items():
-        # Shuffle the durations to obscure the order of typing for privacy
-        shuffled_durations = durations[:]  # make a copy
-        random.shuffle(shuffled_durations)  # shuffle durations for privacy
-        rows.append([bigram, shuffled_durations])
-    
-    # Shuffle the rows themselves to further prevent reconstructing typing sequences
-    random.shuffle(rows)  # shuffle rows for privacy
-    with open(bigram_file, 'w', newline='', encoding='utf-8') as f:
-        writer = csv.writer(f)
-        writer.writerow(["bigram", "durations"])
-        writer.writerows(rows)
+        # ---------- Trigram CSV ----------
+        rows = []
+        for trigram, durations in trigram_durations.items():
+            # Shuffle the durations to obscure typing order
+            shuffled_durations = durations[:]  # copy
+            random.shuffle(shuffled_durations)  # shuffle durations for privacy
+            # store as JSON for safe round-tripping
+            rows.append([trigram, json.dumps(shuffled_durations)])
 
-    # ---------- Trigram CSV ----------
-    rows = []
-    for trigram, durations in trigram_durations.items():
-        # Shuffle the durations to obscure typing order
-        shuffled_durations = durations[:]  # copy
-        random.shuffle(shuffled_durations)  # shuffle durations for privacy
-        rows.append([trigram, shuffled_durations])
-
-    # Shuffle the rows for additional privacy
-    random.shuffle(rows)
-    with open(trigram_file, 'w', newline='', encoding='utf-8') as f:
-        writer = csv.writer(f)
-        writer.writerow(["trigram", "durations"])
-        writer.writerows(rows)
+        # Shuffle the rows for additional privacy
+        random.shuffle(rows)
+        tmp_path = trigram_file + ".tmp"
+        with open(tmp_path, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(["trigram", "durations"])
+            writer.writerows(rows)
+        os.replace(tmp_path, trigram_file)  # atomic replace
 
     last_flush = time.time()
 
@@ -123,20 +135,21 @@ def on_press(key):
         prev_key = key_buffer[-1]
         print(f"Duration: {prev_key} → {key_str} = {interval:.2f} ms")
 
-        # Bigram
-        bigram = prev_key + key_str
-        bigram_durations.setdefault(bigram, []).append(interval)
+        with lock:
+            # Bigram
+            bigram = prev_key + key_str
+            bigram_durations.setdefault(bigram, []).append(interval)
 
-        # Trigram
-        if len(key_buffer) >= 2:
-            trigram = key_buffer[-2] + prev_key + key_str
-            prev_bigram_interval = bigram_durations.get(key_buffer[-2] + prev_key, [0])[-1]
-            trigram_duration = prev_bigram_interval + interval
-            trigram_durations.setdefault(trigram, []).append(trigram_duration)
+            # Trigram
+            if len(key_buffer) >= 2:
+                trigram = key_buffer[-2] + prev_key + key_str
+                prev_bigram_interval = bigram_durations.get(key_buffer[-2] + prev_key, [0])[-1]
+                trigram_duration = prev_bigram_interval + interval
+                trigram_durations.setdefault(trigram, []).append(trigram_duration)
 
-            if key_buffer[-2] in ("<ctrl>", "<ctrl_l>", "<ctrl_r>") and prev_key in ("<shift>", "<shift_l>", "<shift_r>") and key_str == "<esc>":
-                print("\nDetected CTRL → SHIFT → ESC trigram. Exiting the script.\n")
-                return False
+                if key_buffer[-2] in ("<ctrl>", "<ctrl_l>", "<ctrl_r>") and prev_key in ("<shift>", "<shift_l>", "<shift_r>") and key_str == "<esc>":
+                    print("\nDetected CTRL → SHIFT → ESC trigram. Exiting the script.\n")
+                    return False
 
     # Update buffer
     key_buffer.append(key_str)
@@ -148,7 +161,9 @@ def on_press(key):
 # ---------- 10. Listener ----------
 init_csv_files()
 print("\nLogging started. Write a CTRL → SHIFT → ESC trigram to stop.\n")
+
 try:
+    # lock already created above
     with keyboard.Listener(on_press=on_press) as listener:
         listener.join()
 except KeyboardInterrupt:
@@ -176,8 +191,14 @@ def merge_all_files(output_dir, pattern, combined_filename):
                     continue
                 key, durations_str = row
                 try:
-                    # Convert string list back to list of floats/ints
-                    durations = eval(durations_str) if isinstance(durations_str, str) else durations_str
+                    # Prefer JSON, fallback to safe literal_eval for legacy rows
+                    if isinstance(durations_str, str):
+                        try:
+                            durations = json.loads(durations_str)
+                        except json.JSONDecodeError:
+                            durations = ast.literal_eval(durations_str)
+                    else:
+                        durations = durations_str
                     if not isinstance(durations, list):
                         durations = [durations]
                 except Exception:
@@ -190,17 +211,19 @@ def merge_all_files(output_dir, pattern, combined_filename):
     for key, durations in combined_data.items():
         shuffled_durations = durations[:]
         random.shuffle(shuffled_durations)
-        rows.append([key, shuffled_durations])
+        rows.append([key, json.dumps(shuffled_durations)])
 
     # Shuffle rows to further hide sequence info
     random.shuffle(rows)
 
     # Write final combined file
-    combined_path = os.path.join(output_dir.split("/")[0], combined_filename)
-    with open(combined_path, 'w', newline='') as f:
+    combined_path = os.path.join(output_dir, combined_filename)
+    tmp_path = combined_path + ".tmp"
+    with open(tmp_path, 'w', newline='') as f:
         writer = csv.writer(f)
         writer.writerow(["key", "durations"])
         writer.writerows(rows)
+    os.replace(tmp_path, combined_path)
 
     print(f"Combined file saved: {combined_path}")
 
