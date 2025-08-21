@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import importlib
 import sys
 
@@ -178,7 +180,7 @@ stop_event.set()
 flush_thread.join()
 
 # ---------- 11. Merge all past runs into one combined file ----------
-def merge_all_files(output_dir, pattern, combined_filename):
+def merge_all_files(individual_runs_dir, pattern, output_dir, combined_filename):
     """
     Merge all CSV files matching the pattern into a single combined CSV.
     Each bigram/trigram gets one row with durations merged from all runs.
@@ -189,7 +191,7 @@ def merge_all_files(output_dir, pattern, combined_filename):
 
     with lock:   # <-- added lock to avoid race with flush_to_csv()
         # Collect all files matching the pattern (e.g., bigrams_*.csv)
-        for file_path in glob.glob(os.path.join(output_dir, pattern)):
+        for file_path in glob.glob(os.path.join(individual_runs_dir, pattern)):
             if file_path.endswith(combined_filename):  # skip the final combined file itself
                 continue
             with open(file_path, newline='') as f:
@@ -241,8 +243,8 @@ def merge_all_files(output_dir, pattern, combined_filename):
 flush_to_csv()
 
 # Merge all bigram files into one big final file
-merge_all_files(output_dir, "bigrams_*.csv", "bigrams_all.csv")
+merge_all_files(individual_runs, "bigrams_*.csv", output_dir, "bigrams_all.csv")
 
 # Merge all trigram files into one big final file
-merge_all_files(output_dir, "trigrams_*.csv", "trigrams_all.csv")
+merge_all_files(individual_runs, "trigrams_*.csv", output_dir, "trigrams_all.csv")
 print("\nThank you for contributing your duration-data.")
