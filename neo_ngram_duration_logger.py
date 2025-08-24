@@ -35,11 +35,14 @@ import ast
 # ---------- 3. Command-line argument ----------
 parser = argparse.ArgumentParser(description="Keylogger for bigram and trigram durations")
 parser.add_argument("--output-dir", default="./neo_ngram_durations", help="Directory to store log files")
+parser.add_argument("--no-console-logging", action="store_true",
+                    help="Disable console printing of durations (remove this flag to re-enable).")
 args = parser.parse_args()
 output_dir = args.output_dir
-os.makedirs(output_dir, exist_ok=True)
+console_logging = not args.no_console_logging # store flag for console logging
 
 # ---------- 4. File setup ----------
+os.makedirs(output_dir, exist_ok=True)
 individual_runs = os.path.join(output_dir, "individual_runs")
 os.makedirs(individual_runs, exist_ok=True)
 timestamp = datetime.now().strftime("%y%m%d_%H%M%S")
@@ -136,7 +139,6 @@ def on_press(key):
     if last_time is not None and key_buffer:
         interval = current_time - last_time
         prev_key = key_buffer[-1]
-        print(f"Duration: {prev_key} → {key_str} = {interval:.2f} ms")
 
         with lock:
             # Bigram
@@ -154,6 +156,20 @@ def on_press(key):
                     key_str == "<esc>"):
                     print("\nDetected CTRL → SHIFT → ESC trigram. Exiting the script.\n")
                     return False
+
+        # Log to console
+        if console_logging:
+            print(f"{bigram}\t{interval:.2f} ms", end="")
+            if len(key_buffer) >= 2:
+                print(f"\t\t{trigram}\t{trigram_duration:.2f} ms")
+            else:
+                print()
+        else:
+            print(f"**\t{interval:.2f} ms", end="")
+            if len(key_buffer) >= 2:
+                print(f"\t\t***\t{trigram_duration:.2f} ms")
+            else:
+                print()
 
     # Update buffers
     key_buffer.append(key_str)

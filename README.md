@@ -32,7 +32,8 @@ Run the script:
 python neo_ngram_duration_logger.py --output-dir ./this_is_an_optional_output_path
 ```
 
-- --output-dir (optional): directory to store log files (default: ./neo_ngram_durations).
+- `--output-dir` (optional): directory to store log files (default: ./neo_ngram_durations).
+- `--no-console-logging` (optional): Useful if you don't want to show the actual characters console (for privacy reasons).
 - Stop the logger by pressing **CTRL → SHIFT → ESC.**
 
 ## Output
@@ -46,7 +47,7 @@ python neo_ngram_duration_logger.py --output-dir ./this_is_an_optional_output_pa
 
 Each row contains an n-gram and a shuffled list of durations (milliseconds), for example:
 
-```
+```csv
 bigram,durations
 th,"[120.5, 134.2, 128.9]"
 he,"[98.7, 110.3]"
