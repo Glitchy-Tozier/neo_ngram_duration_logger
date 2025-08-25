@@ -29,7 +29,7 @@ pip install pynput
 Run the script:
 
 ```bash
-python neo_ngram_duration_logger.py --output-dir ./this_is_an_optional_output_path
+python neo_ngram_duration_logger.py --output-dir ./neo_ngram_durations
 ```
 
 - `--output-dir` (optional): directory to store log files (default: ./neo_ngram_durations).
