@@ -1,0 +1,338 @@
+---
+title: "Preparing and Further Anonymizing Data"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    code-fold: false
+    theme: cosmo
+    page-layout: article
+---
+
+## Load Packages
+
+```{r}
+############################################
+# 1. Install & load required packages
+############################################
+
+required_packages <- c(
+  "tidyverse",
+  "jsonlite",
+  "here"
+)
+
+installed_packages <- rownames(installed.packages())
+
+for (pkg in required_packages) {
+  if (!pkg %in% installed_packages) {
+    install.packages(pkg)
+  }
+}
+
+library(tidyverse)
+library(jsonlite)
+library(here)
+```
+
+## Load Data
+
+```{r}
+############################################
+# 2. USER SETTINGS
+############################################
+
+parent_dir <- here("collected_durations_raw")
+output_parent_dir <- here("collected_durations_anon")
+
+fake_fraction <- 0.10   # e.g. 0.10 = add 10% fake data
+
+############################################
+# 3. Detect child directories
+############################################
+
+directories <- list.dirs(
+  path = parent_dir,
+  full.names = TRUE,
+  recursive = FALSE
+)
+
+############################################
+# 4. Read helper
+############################################
+
+read_ngram_file <- function(dir_path, file_name) {
+  
+  file_path <- file.path(dir_path, file_name)
+  
+  if (!file.exists(file_path)) return(NULL)
+  
+  read_csv(file_path, show_col_types = FALSE) %>%
+    mutate(durations = map(durations, ~ fromJSON(.x))) %>%
+    unnest(durations) %>%
+    rename(duration = durations) %>%
+    mutate(source = basename(dir_path))
+}
+
+############################################
+# 5. Load all data
+############################################
+
+bigrams_df <- directories %>%
+  map(~ read_ngram_file(.x, "bigrams_all.csv")) %>%
+  compact() %>%
+  bind_rows()
+
+trigrams_df <- directories %>%
+  map(~ read_ngram_file(.x, "trigrams_all.csv")) %>%
+  compact() %>%
+  bind_rows()
+
+# Preserve original data for later comparison
+bigrams_original  <- bigrams_df
+trigrams_original <- trigrams_df
+```
+
+## Poison / Scramble Data
+
+```{r}
+############################################
+# 6. Poisoning function
+############################################
+
+poison_data <- function(df, fake_fraction) {
+  
+  total_n <- nrow(df)
+  n_fake <- floor(total_n * fake_fraction)
+  
+  if (n_fake == 0) return(df)
+  
+  # Per-ngram mean
+  ngram_stats <- df %>%
+    group_by(key) %>%
+    summarise(
+      mean_duration = mean(duration),
+      n = n(),
+      .groups = "drop"
+    )
+  
+  # Global SD
+  pooled_var <- df %>%
+    group_by(key) %>%
+    summarise(
+      n = n(),
+      var = var(duration),
+      .groups = "drop"
+    ) %>%
+    filter(!is.na(var)) %>%
+    summarise(
+      pooled = sum((n - 1) * var) / sum(n - 1)
+    ) %>%
+    pull(pooled)
+  
+  global_sd <- sqrt(pooled_var)
+  insertion_sd = global_sd # / 2 # Add less distortion
+  
+  # Join stats back
+  df_with_stats <- df %>%
+    left_join(ngram_stats, by = "key")
+  
+  # Weighted sampling (proportional to n)
+  sampled_rows <- df_with_stats %>%
+    slice_sample(
+      n = n_fake,
+      weight_by = n,
+      replace = TRUE
+    )
+  
+  # Generate fake durations
+  fake_rows <- sampled_rows %>%
+    mutate(
+      duration = rnorm(
+        n(),
+        mean = mean_duration,
+        sd = insertion_sd
+      )#,
+      #duration = pmax(duration, 1) # prevent negative durations
+    ) %>%
+    select(key, duration, source)
+  
+  # Combine real + fake
+  bind_rows(
+    df %>% select(key, duration, source),
+    fake_rows
+  )
+}
+
+############################################
+# 7. Apply poisoning
+############################################
+
+bigrams_poisoned <- poison_data(bigrams_df, fake_fraction)
+trigrams_poisoned <- poison_data(trigrams_df, fake_fraction)
+```
+
+## Compare Old & New Data
+
+```{r}
+# Label & combine data
+#bigrams_original  <- bigrams_original  %>% mutate(version = "original") # Currently not used
+trigrams_original <- trigrams_original %>% mutate(version = "original")
+# bigrams_poisoned  <- bigrams_poisoned  %>% mutate(version = "poisoned") # Currently not used
+trigrams_poisoned <- trigrams_poisoned %>% mutate(version = "poisoned")
+
+trigrams_combined <- bind_rows(
+  trigrams_original,
+  trigrams_poisoned
+)
+
+# Classify data
+classified_trigrams <- trigrams_combined %>%
+  filter(duration < 2500 & duration > 0) %>%
+  mutate(
+    type = case_when(
+      str_detect(key, r"(^[a-z][a-z][a-z]$)") ~ "letterLetterLetter",
+      #str_detect(key, r"(^[a-z]\.<space>$)")  ~ "letterDotSpace",
+      #str_detect(key, r"(^\.<space>[A-Z]$)")  ~ "dotSpaceLetter",
+      str_detect(key, r"(^\.<space><shift)")  ~ "dotSpaceShift",
+      #str_detect(key, r"(^[a-z]\.<enter>$)")  ~ "letterDotEnter",
+      #str_detect(key, r"(^\.<enter>[A-Z]$)")  ~ "dotEnterLetter",
+      str_detect(key, r"(^\.<enter><shift)")  ~ "dotEnterShift",
+      TRUE ~ "other"
+    )
+  )
+
+# Plot differences
+classified_trigrams %>%
+  ggplot(aes(x = type, y = duration, fill = version)) +
+  geom_violin(alpha = 0.4, position = position_dodge(width = 0.8)) +
+  geom_boxplot(
+    alpha = 0.2,
+    width = 0.4,
+    outlier.shape = NA,
+    position = position_dodge(width = 0.8)
+  ) +
+  labs(
+    title = "Original vs Poisoned Trigram Durations",
+    x = "Trigram Type",
+    y = "Duration (ms)"
+  ) +
+  theme_minimal()
+
+# Analyze differences
+(t_test_results <- classified_trigrams %>%
+    group_by(type) %>%
+    summarise(
+      t_obj = list(
+        t.test(
+          duration ~ version,
+          data = pick(everything())
+        )
+      ),
+      .groups = "drop"
+    ) %>%
+    transmute(
+      type,
+      p_value = map_dbl(t_obj, "p.value"),
+      mean_original = map_dbl(t_obj, ~ .x$estimate[1]),
+      mean_poisoned = map_dbl(t_obj, ~ .x$estimate[2]),
+      mean_diff = mean_poisoned - mean_original
+    ))
+```
+
+
+## Save New Data
+
+```{r}
+############################################
+# 8. Re-nest to original structure
+############################################
+
+nest_ngram_data <- function(df) {
+  
+  df %>%
+    group_by(source, key) %>%
+    summarise(
+      durations = list(duration),
+      .groups = "drop"
+    ) %>%
+    mutate(
+      durations = map_chr(
+        durations,
+        ~ jsonlite::toJSON(.x, auto_unbox = FALSE)
+      )
+    )
+}
+
+bigrams_nested <- nest_ngram_data(bigrams_poisoned)
+trigrams_nested <- nest_ngram_data(trigrams_poisoned)
+
+############################################
+# 9. Generate shortest unique prefixes
+############################################
+
+shorten_names <- function(names_vec) {
+  
+  result <- character(length(names_vec))
+  
+  for (i in seq_along(names_vec)) {
+    name <- names_vec[i]
+    
+    for (len in 1:nchar(name)) {
+      prefix <- substr(name, 1, len)
+      others <- names_vec[-i]
+      
+      if (!any(startsWith(others, prefix))) {
+        result[i] <- prefix
+        break
+      }
+    }
+  }
+  
+  result
+}
+
+original_sources <- unique(bigrams_nested$source)
+new_source_names <- shorten_names(original_sources)
+
+source_map <- tibble(
+  source = original_sources,
+  new_source = new_source_names
+)
+
+############################################
+# 10. Write anonymized directory structure
+############################################
+
+dir.create(output_parent_dir, showWarnings = FALSE)
+
+write_ngram_files <- function(nested_df, file_name) {
+  
+  nested_df %>%
+    left_join(source_map, by = "source") %>%
+    group_split(new_source) %>%
+    walk(function(df_part) {
+      
+      new_dir <- file.path(output_parent_dir, df_part$new_source[1])
+      dir.create(new_dir, showWarnings = FALSE)
+      
+      write_csv(
+        df_part %>%
+          select(key, durations),
+        file.path(new_dir, file_name)
+      )
+    })
+}
+
+#write_ngram_files(bigrams_nested, "bigrams_all.csv")
+write_ngram_files(trigrams_nested, "trigrams_all.csv")
+
+############################################
+# DONE
+############################################
+
+cat("Poisoned & anonymized dataset written to:\n", output_parent_dir)
+```
+
