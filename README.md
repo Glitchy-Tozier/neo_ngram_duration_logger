@@ -52,3 +52,14 @@ bigram,durations
 th,"[120.5, 134.2, 128.9]"
 he,"[98.7, 110.3]"
 ```
+
+# Statistical Analysis
+
+Unless you plan to upload your ngram data somewhere, I suggest ignoring `data_preparation.qmd`.
+
+Instead, you can directly run `data_evaluation.qmd`. To do so, I recommend installing the R programming language and RStudio, then opening the file in that code editor.
+
+Example output:
+
+![Grouped Duration Comparison](plots/grouped_duration_comparison.png)
+![Duration Comparison split per Person](plots/split_duration_comparison.png)
