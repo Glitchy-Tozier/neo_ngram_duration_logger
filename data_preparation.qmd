@@ -15,7 +15,7 @@ format:
 
 ```{r}
 ############################################
-# 1. Install & load required packages
+# Install & load required packages
 ############################################
 
 required_packages <- c(
@@ -41,7 +41,7 @@ library(here)
 
 ```{r}
 ############################################
-# 2. USER SETTINGS
+# USER SETTINGS
 ############################################
 
 parent_dir <- here("collected_durations_raw")
@@ -50,7 +50,7 @@ output_parent_dir <- here("collected_durations_anon")
 fake_fraction <- 0.10   # e.g. 0.10 = add 10% fake data
 
 ############################################
-# 3. Detect child directories
+# Detect child directories
 ############################################
 
 directories <- list.dirs(
@@ -60,7 +60,7 @@ directories <- list.dirs(
 )
 
 ############################################
-# 4. Read helper
+# Read helper
 ############################################
 
 read_ngram_file <- function(dir_path, file_name) {
@@ -77,7 +77,7 @@ read_ngram_file <- function(dir_path, file_name) {
 }
 
 ############################################
-# 5. Load all data
+# Load all data
 ############################################
 
 bigrams_df <- directories %>%
@@ -99,7 +99,7 @@ trigrams_original <- trigrams_df
 
 ```{r}
 ############################################
-# 6. Poisoning function
+# Poisoning function
 ############################################
 
 poison_data <- function(df, fake_fraction) {
@@ -167,7 +167,7 @@ poison_data <- function(df, fake_fraction) {
 }
 
 ############################################
-# 7. Apply poisoning
+# Apply poisoning
 ############################################
 
 bigrams_poisoned <- poison_data(bigrams_df, fake_fraction)
@@ -247,7 +247,7 @@ classified_trigrams %>%
 
 ```{r}
 ############################################
-# 8. Re-nest to original structure
+# Re-nest to original structure
 ############################################
 
 nest_ngram_data <- function(df) {
@@ -270,7 +270,7 @@ bigrams_nested <- nest_ngram_data(bigrams_poisoned)
 trigrams_nested <- nest_ngram_data(trigrams_poisoned)
 
 ############################################
-# 9. Generate shortest unique prefixes
+# Generate shortest unique prefixes
 ############################################
 
 shorten_names <- function(names_vec) {
@@ -303,7 +303,7 @@ source_map <- tibble(
 )
 
 ############################################
-# 10. Write anonymized directory structure
+# Write anonymized directory structure
 ############################################
 
 dir.create(output_parent_dir, showWarnings = FALSE)
