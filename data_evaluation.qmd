@@ -1,0 +1,350 @@
+---
+title: "Keylogger Data Evaluation"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    code-fold: false
+    theme: cosmo
+    page-layout: article
+---
+
+## Load packages
+
+```{r}
+############################################
+# Install & load required packages
+############################################
+
+required_packages <- c(
+  "tidyverse",
+  "jsonlite",
+  "tidytext",
+  "here"
+)
+
+installed_packages <- rownames(installed.packages())
+
+for (pkg in required_packages) {
+  if (!pkg %in% installed_packages) {
+    install.packages(pkg)
+  }
+}
+
+library(tidyverse)
+library(jsonlite)
+library(tidytext)
+library(here)
+```
+
+## Load data
+
+```{r}
+############################################
+# Define parent directory
+############################################
+
+# This folder should be the parent directory. It should contain direct subdirectories, each of which contains a `bigrams_all.csv` and a `trigrams_all.csv` file. Like this:
+#
+# parent/
+# ├── source_1/
+# │   ├── bigrams_all.csv
+# │   └── trigrams_all.csv
+# ├── source_2/
+# │   ├── bigrams_all.csv
+# │   └── trigrams_all.csv
+# └── source_3/
+#     ├── bigrams_all.csv
+#     └── trigrams_all.csv
+
+#parent_dir <- here("collected_durations_raw")
+parent_dir <- here("collected_durations_anon")
+
+if (!dir.exists(parent_dir)) {
+  stop("Parent directory does not exist.")
+}
+
+############################################
+# Detect all immediate child directories
+############################################
+
+directories <- list.dirs(
+  path = parent_dir,
+  full.names = TRUE,
+  recursive = FALSE
+)
+
+if (length(directories) == 0) {
+  stop("No child directories found inside parent directory.")
+}
+
+############################################
+# Helper function to read & pivot files
+############################################
+
+read_ngram_file <- function(dir_path, file_name) {
+  
+  file_path <- file.path(dir_path, file_name)
+  
+  if (!file.exists(file_path)) {
+    warning(paste("File not found:", file_path))
+    return(NULL)
+  }
+  
+  read_csv(file_path, show_col_types = FALSE) %>%
+    
+    # Parse JSON-like duration column
+    mutate(
+      durations = map(durations, ~ jsonlite::fromJSON(.x))
+      #key = as.character(key)
+    ) %>%
+    
+    # Convert to long format
+    unnest(durations) %>%
+    
+    rename(duration = durations) %>%
+    
+    # Use child directory name as source
+    mutate(source = basename(dir_path))
+}
+
+############################################
+# Load and combine all bigrams
+############################################
+
+#bigrams_raw_df <- directories %>%
+#  map(~ read_ngram_file(.x, "bigrams_all.csv")) %>%
+#  compact() %>%
+#  bind_rows()
+
+############################################
+# Load and combine all trigrams
+############################################
+
+trigrams_raw_df <- directories %>%
+  map(~ read_ngram_file(.x, "trigrams_all.csv")) %>%
+  compact() %>%
+  bind_rows()
+
+############################################
+# Result
+############################################
+
+# bigrams_df and trigrams_df now:
+# - are in long format (one duration per row)
+# - contain a "source" column
+# - are combined across all directories
+
+#print(glimpse(bigrams_raw_df))
+print(glimpse(trigrams_raw_df))
+```
+
+## Clean data
+
+```{r}
+
+############################################
+# Settings
+############################################
+
+duration_threshold <- 2000#10000
+min_n_per_source <- 1   # <-- change this as needed
+
+
+############################################
+# Helper function
+############################################
+
+filter_ngrams <- function(df, label) {
+  
+  n_total <- nrow(df)
+  
+  # Step 1: Minimum duration filter
+  df_duration_min_filtered <- df %>%
+    filter(duration > 0)
+  n_after_min_duration <- nrow(df_duration_min_filtered)
+  n_removed_min_duration <- n_total - n_after_min_duration
+  
+  # Step 2: Maximum duration filter
+  df_duration_max_filtered <- df_duration_min_filtered %>%
+    filter(duration < duration_threshold)
+  n_after_max_duration <- nrow(df_duration_max_filtered)
+  n_removed_max_duration <- n_after_min_duration - n_after_max_duration
+  
+  # Step 3: Minimum frequency per source
+  df_freq_filtered <- df_duration_max_filtered %>%
+    group_by(source, key) %>%
+    filter(n() >= min_n_per_source) %>%
+    ungroup()
+  n_final <- nrow(df_freq_filtered)
+  n_removed_frequency <- n_after_max_duration - n_final
+  
+  # Reporting
+  cat(
+    "\n", label, "\n",
+    "--------------------------------\n",
+    "Initial rows:                  ", n_total, "\n",
+    "Removed (min duration filter): ", n_removed_min_duration, 
+      " (", round(100 * n_removed_min_duration / n_total, 2), "%)\n",
+    "Removed (max duration filter): ", n_removed_max_duration, 
+      " (", round(100 * n_removed_max_duration / n_total, 2), "%)\n",
+    "Removed (freq <", min_n_per_source, "):             ", n_removed_frequency,
+      " (", round(100 * n_removed_frequency / n_total, 2), "%)\n",
+    "Final rows:                    ", n_final, "\n",
+    sep = ""
+  )
+  
+  return(df_freq_filtered)
+}
+
+
+############################################
+# Apply filtering
+############################################
+
+#bigrams_df  <- filter_ngrams(bigrams_raw_df,  "Bigrams")
+trigrams_df <- filter_ngrams(trigrams_raw_df, "Trigrams")
+```
+
+
+## Analyze data
+
+```{r}
+#(bigrams_summarized <- bigrams_df %>%
+#   group_by(key) %>%
+#   summarize(
+#     mean = mean(duration),
+#     median = median(duration),
+#     n = n()
+#   ) %>%
+#   arrange(desc(median)))
+
+(trigrams_summarized <- trigrams_df %>%
+    group_by(key) %>%
+    summarize(
+      mean = mean(duration),
+      median = median(duration),
+      n = n()
+    ) %>%
+    arrange(desc(median)))
+```
+
+### Plot data
+
+```{r}
+#| fig-width: 10
+#| fig-height: 12
+#| fig-dpi: 400
+
+############################################
+# Compute median per source + key
+############################################
+
+ngram_limit <- 40
+trigrams_ranked <- trigrams_df %>%
+  group_by(source, key) %>%
+  summarise(
+    median_duration = median(duration, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  group_by(source) %>%
+  slice_max(median_duration, n = ngram_limit) %>%   # top 40 within each source
+  ungroup()
+
+############################################
+# Keep only those keys
+############################################
+
+trigrams_plot_df <- trigrams_df %>%
+  filter(source != "flo_old") %>%
+  semi_join(trigrams_ranked, by = c("source", "key")) %>%
+  left_join(trigrams_ranked, by = c("source", "key"))
+
+############################################
+# Reorder within facet
+############################################
+
+trigrams_plot_df %>%
+  ggplot(aes(
+    x = reorder_within(key, median_duration, source),
+    y = duration
+  )) +
+  geom_boxplot(outlier.size = 0.3) +
+  coord_flip() +
+  scale_y_log10() +
+  facet_wrap(~ source, scales = "free") +
+  scale_x_reordered() +
+  labs(
+    title = paste("Top", ngram_limit, "slowest bigrams per source (by median duration)"),
+    x = "Ngram",
+    y = "Duration (log10 ms)"
+  ) +
+  theme_minimal() +
+  theme(axis.text.y = element_text(size = 6))
+
+```
+
+```{r}
+(classified_trigrams <- trigrams_df  %>%
+   mutate(
+     type = case_when(
+       str_detect(key, r"(^[a-z][a-z][a-z]$)") ~ "letterLetterLetter",
+       #str_detect(key, r"(^[a-z]\.<space>$)")  ~ "letterDotSpace",
+       #str_detect(key, r"(^\.<space>[A-Z]$)")  ~ "dotSpaceLetter",
+       str_detect(key, r"(^\.<space><shift)")  ~ "dotSpaceShift",
+       #str_detect(key, r"(^[a-z]\.<enter>$)")  ~ "letterDotEnter",
+       #str_detect(key, r"(^\.<enter>[A-Z]$)")  ~ "dotEnterLetter",
+       str_detect(key, r"(^\.<enter><shift)")  ~ "dotEnterShift",
+       TRUE ~ "other"
+#     ),
+#     type_broad = case_when(
+#       type == "letterDotSpace" | type == "letterDotEnter" ~ "letterDotWhitespace",
+#       type == "dotSpaceLetter" | type == "dotEnterLetter" ~ "dotWhitespaceLetter",
+#       type == "letterDotSpace" | type == "letterDotSpace" ~ ,
+     )
+   )# %>% filter(type == "letterDotSpace")
+)
+
+classified_trigrams %>%
+  #filter(type %in% c("dotSpaceShift", "dotEnterShift", "letterLetterLetter")) %>%
+  ggplot(aes(x = type, y = duration, fill = type)) +
+  geom_violin(alpha = 0.4) +
+  geom_boxplot(alpha = 0.15, width = 0.6, outlier.shape = NA) +
+  #scale_y_log10() +
+  labs(
+    title = "Typing duration distribution for different types of trigrams",
+    x = "Trigram Type",
+    y = "Duration"# (log10 ms)"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_blank())
+```
+
+```{r}
+#| fig-width: 10
+#| fig-height: 3
+#| fig-dpi: 400
+
+##| fig-width: 5
+##| fig-height: 9
+
+classified_trigrams %>%
+  ggplot(aes(x = type, y = duration, fill = type)) +
+  geom_violin(alpha = 0.4) +
+  geom_boxplot(alpha = 0.15, width = 0.6, outlier.shape = NA) +
+  facet_wrap(~ source) +#, ncol = 1) +
+  labs(
+    title = "Typing duration distribution for different types of trigrams per person",
+    x = "Trigram Type",
+    y = "Duration"# (log10 ms)"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_blank()) +
+theme(
+  panel.border = element_rect(color = "gray80", fill = NA, size = 0.5),
+  panel.spacing = unit(1.5, "lines")
+)
+```
+
