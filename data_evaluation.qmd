@@ -290,20 +290,18 @@ trigrams_plot_df %>%
 (classified_trigrams <- trigrams_df  %>%
    mutate(
      type = case_when(
-       str_detect(key, r"(^[a-z][a-z][a-z]$)") ~ "letterLetterLetter",
+       str_detect(key, r"(^[a-z][a-z][a-z]$)") ~ "letter→letter→letter",
        #str_detect(key, r"(^[a-z]\.<space>$)")  ~ "letterDotSpace",
        #str_detect(key, r"(^\.<space>[A-Z]$)")  ~ "dotSpaceLetter",
-       str_detect(key, r"(^\.<space><shift)")  ~ "dotSpaceShift",
+       str_detect(key, r"(^\.<space><shift)")  ~ "dot→space→shift",
        #str_detect(key, r"(^[a-z]\.<enter>$)")  ~ "letterDotEnter",
        #str_detect(key, r"(^\.<enter>[A-Z]$)")  ~ "dotEnterLetter",
-       str_detect(key, r"(^\.<enter><shift)")  ~ "dotEnterShift",
-       TRUE ~ "other"
-#     ),
-#     type_broad = case_when(
-#       type == "letterDotSpace" | type == "letterDotEnter" ~ "letterDotWhitespace",
-#       type == "dotSpaceLetter" | type == "dotEnterLetter" ~ "dotWhitespaceLetter",
-#       type == "letterDotSpace" | type == "letterDotSpace" ~ ,
-     )
+       str_detect(key, r"(^\.<enter><shift)")  ~ "dot→enter→shift",
+       str_detect(key, r"(^\,<space><shift)")  ~ "komma→space→shift",
+       str_detect(key, r"(^\,<space>[a-z])")  ~ "komma→space→letter",
+       TRUE ~ "all other"
+     ),
+     type = factor(type, levels = c("dot→enter→shift", "dot→space→shift", "komma→space→shift", "komma→space→letter", "letter→letter→letter", "all other"))#, ordered = TRUE)
    )# %>% filter(type == "letterDotSpace")
 )
 
@@ -316,14 +314,15 @@ classified_trigrams %>%
   labs(
     title = "Typing duration distribution for different types of trigrams",
     x = "Trigram Type",
-    y = "Duration"# (log10 ms)"
+    y = "Duration",# (log10 ms)"
+    fill = "Trigram type"
   ) +
   theme_minimal() +
   theme(axis.text.x = element_blank())
 ```
 
 ```{r}
-#| fig-width: 10
+#| fig-width: 11
 #| fig-height: 3
 #| fig-dpi: 400
 
@@ -337,8 +336,9 @@ classified_trigrams %>%
   facet_wrap(~ source) +#, ncol = 1) +
   labs(
     title = "Typing duration distribution for different types of trigrams per person",
-    x = "Trigram Type",
-    y = "Duration"# (log10 ms)"
+    x = "Trigram type, per person",
+    y = "Duration",# (log10 ms)"
+    fill = "Trigram type"
   ) +
   theme_minimal() +
   theme(axis.text.x = element_blank()) +

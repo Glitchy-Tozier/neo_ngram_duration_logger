@@ -200,6 +200,8 @@ classified_trigrams <- trigrams_combined %>%
       #str_detect(key, r"(^[a-z]\.<enter>$)")  ~ "letterDotEnter",
       #str_detect(key, r"(^\.<enter>[A-Z]$)")  ~ "dotEnterLetter",
       str_detect(key, r"(^\.<enter><shift)")  ~ "dotEnterShift",
+      str_detect(key, r"(^\,<space><shift)")  ~ "kommaSpaceShift",
+      str_detect(key, r"(^\,<space>[a-z])")  ~ "kommaSpaceletter",
       TRUE ~ "other"
     )
   )
