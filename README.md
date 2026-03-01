@@ -53,9 +53,13 @@ th,"[120.5, 134.2, 128.9]"
 he,"[98.7, 110.3]"
 ```
 
-# Statistical Analysis
+# Scrambling your data
 
-Unless you plan to upload your ngram data somewhere, I suggest ignoring `data_preparation.qmd`.
+Should you plan to upload your ngram data somewhere, I suggest running `data_preparation.qmd` before doing so. This further anonymizes / poisons your data, without distorting analysis in any meaningful way.
+
+If you do not plan on uploading your data to a public repository, you can ignore this step and continue onwards to `Data Analysis`.
+
+# Data Analysis
 
 Instead, you can directly run `data_evaluation.qmd`. To do so, I recommend installing the R programming language and RStudio, then opening the file in that code editor.
 
