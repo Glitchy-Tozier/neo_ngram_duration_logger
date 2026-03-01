@@ -332,6 +332,33 @@ write_ngram_files <- function(nested_df, file_name) {
 write_ngram_files(trigrams_nested, "trigrams_all.csv")
 
 ############################################
+# Copy optional context.md files
+############################################
+
+copy_context_files <- function(source_map, parent_dir, output_parent_dir) {
+  
+  source_map %>%
+    pwalk(function(source, new_source) {
+      
+      original_context_path <- file.path(parent_dir, source, "context.md")
+      
+      if (file.exists(original_context_path)) {
+        
+        new_dir <- file.path(output_parent_dir, new_source)
+        dir.create(new_dir, showWarnings = FALSE)
+        
+        file.copy(
+          from = original_context_path,
+          to   = file.path(new_dir, "context.md"),
+          overwrite = TRUE
+        )
+      }
+    })
+}
+
+copy_context_files(source_map, parent_dir, output_parent_dir)
+
+############################################
 # DONE
 ############################################
 
