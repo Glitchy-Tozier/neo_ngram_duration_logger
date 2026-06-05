@@ -323,7 +323,7 @@ classified_trigrams %>%
 
 ```{r}
 #| fig-width: 11
-#| fig-height: 3
+#| fig-height: 7
 #| fig-dpi: 400
 
 ##| fig-width: 5
