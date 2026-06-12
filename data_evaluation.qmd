@@ -150,12 +150,23 @@ print(glimpse(trigrams_raw_df))
 ############################################
 
 duration_threshold <- 2000#10000
+tripple_char_min_speed <- 100
 min_n_per_source <- 1   # <-- change this as needed
 
 
 ############################################
 # Helper function
 ############################################
+
+split_ngrams <- function(df) {
+  df %>%
+    extract(
+      key,
+      into = c("k1", "k2", "k3"),
+      regex = "^(<[^<>]+>|[^<])(<[^<>]+>|[^<])(<[^<>]+>|[^<])$",
+      remove = FALSE
+    )
+}
 
 filter_ngrams <- function(df, label) {
   
@@ -178,25 +189,37 @@ filter_ngrams <- function(df, label) {
     group_by(source, key) %>%
     filter(n() >= min_n_per_source) %>%
     ungroup()
-  n_final <- nrow(df_freq_filtered)
-  n_removed_frequency <- n_after_max_duration - n_final
+  n_after_freq <- nrow(df_freq_filtered)
+  n_removed_freq <- n_after_max_duration - n_after_freq
+  
+  # Step 4: Filter rapid-Fire sequences (eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee)
+  df_rapid_fire <- df_freq_filtered %>%
+    filter(!(
+      k1 == k2 &
+        k2 == k3 &
+        duration < tripple_char_min_speed))
+  n_after_rapid_fire <- nrow(df_rapid_fire)
+  n_removed_rapid_fire <- n_after_freq - n_after_rapid_fire
   
   # Reporting
+  n_final <- n_after_rapid_fire
   cat(
     "\n", label, "\n",
     "--------------------------------\n",
     "Initial rows:                  ", n_total, "\n",
     "Removed (min duration filter): ", n_removed_min_duration, 
-      " (", round(100 * n_removed_min_duration / n_total, 2), "%)\n",
+    " (", round(100 * n_removed_min_duration / n_total, 2), "%)\n",
     "Removed (max duration filter): ", n_removed_max_duration, 
-      " (", round(100 * n_removed_max_duration / n_total, 2), "%)\n",
-    "Removed (freq <", min_n_per_source, "):             ", n_removed_frequency,
-      " (", round(100 * n_removed_frequency / n_total, 2), "%)\n",
+    " (", round(100 * n_removed_max_duration / n_total, 2), "%)\n",
+    "Removed (freq <", min_n_per_source, "):             ", n_removed_freq,
+    " (", round(100 * n_removed_freq / n_total, 2), "%)\n",
+    "Removed (tripple char <", min_n_per_source, "ms):   ", n_removed_rapid_fire,
+    " (", round(100 * n_removed_rapid_fire / n_total, 2), "%)\n",
     "Final rows:                    ", n_final, "\n",
     sep = ""
   )
   
-  return(df_freq_filtered)
+  return(df_rapid_fire)
 }
 
 
@@ -205,11 +228,13 @@ filter_ngrams <- function(df, label) {
 ############################################
 
 #bigrams_df  <- filter_ngrams(bigrams_raw_df,  "Bigrams")
-trigrams_df <- filter_ngrams(trigrams_raw_df, "Trigrams")
+(trigrams_df <- trigrams_raw_df %>% split_ngrams() %>% filter_ngrams("Trigrams"))
 ```
 
 
 ## Analyze data
+
+### Print extreme ngrams
 
 ```{r}
 #(bigrams_summarized <- bigrams_df %>%
@@ -222,53 +247,66 @@ trigrams_df <- filter_ngrams(trigrams_raw_df, "Trigrams")
 #   arrange(desc(median)))
 
 (trigrams_summarized <- trigrams_df %>%
-    group_by(key) %>%
-    summarize(
-      mean = mean(duration),
-      median = median(duration),
-      n = n()
-    ) %>%
-    arrange(desc(median)))
+   group_by(key) %>%
+   summarize(
+     mean = mean(duration),
+     median = median(duration),
+     n = n()
+   ) %>%
+   arrange(desc(median)))
 ```
 
-### Plot data
+### Plot extreme ngrams
 
 ```{r}
 #| fig-width: 10
-#| fig-height: 12
+#| fig-height: 10
 #| fig-dpi: 400
 
 ############################################
 # Compute median per source + key
 ############################################
 
-ngram_limit <- 40
-trigrams_ranked <- trigrams_df %>%
-  group_by(source, key) %>%
-  summarise(
-    median_duration = median(duration, na.rm = TRUE),
-    .groups = "drop"
-  ) %>%
+ngram_limit <- 30
+(trigrams_ranked <- trigrams_df %>%
+    group_by(source, key) %>%
+    summarise(
+      median_duration = median(duration, na.rm = TRUE),
+      n = n(),
+      .groups = "drop"
+    ) %>%
+    mutate(
+      key_label = paste0(key, "  n=", n)
+    ))
+slowest_trigrams <- trigrams_ranked %>%
   group_by(source) %>%
   slice_max(median_duration, n = ngram_limit) %>%   # top 40 within each source
+  ungroup()
+fastest_trigrams <- trigrams_ranked %>%
+  group_by(source) %>%
+  slice_min(median_duration, n = ngram_limit) %>%   # top 40 within each source
   ungroup()
 
 ############################################
 # Keep only those keys
 ############################################
 
-trigrams_plot_df <- trigrams_df %>%
+slowest_trigrams_plot_df <- trigrams_df %>%
   filter(source != "flo_old") %>%
-  semi_join(trigrams_ranked, by = c("source", "key")) %>%
-  left_join(trigrams_ranked, by = c("source", "key"))
+  semi_join(slowest_trigrams, by = c("source", "key")) %>%
+  left_join(slowest_trigrams, by = c("source", "key"))
+fastest_trigrams_plot_df <- trigrams_df %>%
+  filter(source != "flo_old") %>%
+  semi_join(fastest_trigrams, by = c("source", "key")) %>%
+  left_join(fastest_trigrams, by = c("source", "key"))
 
 ############################################
 # Reorder within facet
 ############################################
 
-trigrams_plot_df %>%
+slowest_trigrams_plot_df %>%
   ggplot(aes(
-    x = reorder_within(key, median_duration, source),
+    x = reorder_within(key_label, median_duration, source),
     y = duration
   )) +
   geom_boxplot(outlier.size = 0.3) +
@@ -283,28 +321,54 @@ trigrams_plot_df %>%
   ) +
   theme_minimal() +
   theme(axis.text.y = element_text(size = 6))
-
+fastest_trigrams_plot_df %>%
+  ggplot(aes(
+    x = reorder_within(key_label, median_duration, source),
+    y = duration
+  )) +
+  geom_boxplot(outlier.size = 0.3) +
+  coord_flip() +
+  scale_y_log10() +
+  facet_wrap(~ source, scales = "free") +
+  scale_x_reordered() +
+  labs(
+    title = paste("Top", ngram_limit, "fastest bigrams per source (by median duration)"),
+    x = "Ngram",
+    y = "Duration (log10 ms)"
+  ) +
+  theme_minimal() +
+  theme(axis.text.y = element_text(size = 6))
 ```
+
+### Prepare data for plotting
 
 ```{r}
 (classified_trigrams <- trigrams_df  %>%
    mutate(
      type = case_when(
-       str_detect(key, r"(^[a-z][a-z][a-z]$)") ~ "letter→letter→letter",
-       #str_detect(key, r"(^[a-z]\.<space>$)")  ~ "letterDotSpace",
-       #str_detect(key, r"(^\.<space>[A-Z]$)")  ~ "dotSpaceLetter",
-       str_detect(key, r"(^\.<space><shift)")  ~ "dot→space→shift",
-       #str_detect(key, r"(^[a-z]\.<enter>$)")  ~ "letterDotEnter",
-       #str_detect(key, r"(^\.<enter>[A-Z]$)")  ~ "dotEnterLetter",
+       #str_detect(key, r"(^[a-z]\.<enter>$)")  ~ "letter→dot→enter",
+       #str_detect(key, r"(^[a-z]\.<space>$)")  ~ "letter→dot→space",
+       #str_detect(key, r"(^[a-z]\,<space>$)")  ~ "letter→comma→space",
        str_detect(key, r"(^\.<enter><shift)")  ~ "dot→enter→shift",
+       str_detect(key, r"(^\.<space><shift)")  ~ "dot→space→shift",
        str_detect(key, r"(^\,<space><shift)")  ~ "komma→space→shift",
        str_detect(key, r"(^\,<space>[a-z])")  ~ "komma→space→letter",
+       str_detect(key, r"(^[a-z][a-z][a-z]$)") ~ "letter→letter→letter",
+       #str_detect(key, r"(^\.<space>[A-Z]$)")  ~ "dotSpaceLetter",
+       #str_detect(key, r"(^\.<enter>[A-Z]$)")  ~ "dotEnterLetter",
        TRUE ~ "all other"
      ),
-     type = factor(type, levels = c("dot→enter→shift", "dot→space→shift", "komma→space→shift", "komma→space→letter", "letter→letter→letter", "all other"))#, ordered = TRUE)
+     type = factor(type, levels = c("letter→dot→enter", "letter→dot→space", "letter→comma→space", "dot→enter→shift", "dot→space→shift", "komma→space→shift", "komma→space→letter", "letter→letter→letter", "all other"))#, ordered = TRUE)
    )# %>% filter(type == "letterDotSpace")
 )
 
+classified_trigrams %>% count(type)
+classified_trigrams %>% group_by(source) %>% count(type)
+```
+
+### Plot data
+
+```{r}
 classified_trigrams %>%
   #filter(type %in% c("dotSpaceShift", "dotEnterShift", "letterLetterLetter")) %>%
   ggplot(aes(x = type, y = duration, fill = type)) +
@@ -342,9 +406,9 @@ classified_trigrams %>%
   ) +
   theme_minimal() +
   theme(axis.text.x = element_blank()) +
-theme(
-  panel.border = element_rect(color = "gray80", fill = NA, size = 0.5),
-  panel.spacing = unit(1.5, "lines")
-)
+  theme(
+    panel.border = element_rect(color = "gray80", fill = NA, size = 0.5),
+    panel.spacing = unit(1.5, "lines")
+  )
 ```
 
